@@ -1,0 +1,283 @@
+# E-commerce Analytics Warehouse Configuration
+
+# Snowflake Configuration
+snowflake:
+  account: "${SNOWFLAKE_ACCOUNT}"
+  user: "${SNOWFLAKE_USER}"
+  password: "${SNOWFLAKE_PASSWORD}"
+  role: "ACCOUNTADMIN"
+  warehouse: "analytics_wh"
+  database: "ecommerce_analytics"
+  schema: "staging"
+  
+  connection_params:
+    client_session_keep_alive: true
+    query_timeout: 300
+    network_timeout: 60
+
+# ETL Pipeline Configuration
+pipeline:
+  batch_size: 10000
+  parallel_workers: 4
+  retry_attempts: 3
+  retry_delay_seconds: 60
+  
+  schedules:
+    web_events_ingestion: "*/15 * * * *"  # Every 15 minutes
+    orders_ingestion: "*/5 * * * *"       # Every 5 minutes
+    customer_sync: "0 */6 * * *"          # Every 6 hours
+    product_sync: "0 2 * * *"             # Daily at 2 AM
+    rfm_calculation: "0 3 * * *"          # Daily at 3 AM
+    cohort_analysis: "0 4 * * 0"          # Weekly on Sunday at 4 AM
+    product_affinity: "0 5 * * 0"         # Weekly on Sunday at 5 AM
+
+# Analytics Configuration
+analytics:
+  rfm:
+    recency_bins: 5
+    frequency_bins: 5
+    monetary_bins: 5
+    
+    segments:
+      champions:
+        min_r_score: 4
+        min_f_score: 4
+        min_m_score: 4
+      
+      loyal_customers:
+        min_r_score: 3
+        min_f_score: 3
+        min_m_score: 3
+      
+      at_risk:
+        max_r_score: 2
+        min_f_score: 3
+      
+      lost_customers:
+        max_r_score: 2
+        max_f_score: 2
+  
+  conversion_funnel:
+    stages:
+      - name: "visit"
+        metric: "sessions"
+      - name: "product_view"
+        metric: "product_views"
+      - name: "add_to_cart"
+        metric: "add_to_cart"
+      - name: "checkout"
+        metric: "checkout_started"
+      - name: "purchase"
+        metric: "purchase_completed"
+  
+  cohort_analysis:
+    period: "monthly"
+    retention_periods: 12
+    min_cohort_size: 10
+  
+  product_affinity:
+    min_support: 0.01
+    min_confidence: 0.3
+    min_lift: 1.2
+    max_pairs: 1000
+
+# API Configuration
+api:
+  host: "0.0.0.0"
+  port: 5000
+  debug: false
+  cors_origins: ["*"]
+  rate_limit: "100 per minute"
+  
+  authentication:
+    enabled: true
+    type: "api_key"
+    header_name: "X-API-Key"
+  
+  endpoints:
+    health: "/health"
+    analytics_summary: "/api/v1/analytics/summary"
+    rfm_analysis: "/api/v1/customers/rfm"
+    customer_segments: "/api/v1/customers/segments"
+    conversion_funnel: "/api/v1/conversion/funnel"
+    product_affinity: "/api/v1/products/affinity"
+    cohort_retention: "/api/v1/cohorts/retention"
+    customer_behavior: "/api/v1/customers/behavior"
+    kpis: "/api/v1/metrics/kpis"
+
+# Data Sources
+data_sources:
+  web_analytics:
+    type: "google_analytics"
+    property_id: "${GA_PROPERTY_ID}"
+    credentials_path: "config/ga_credentials.json"
+    metrics:
+      - "sessions"
+      - "pageviews"
+      - "users"
+      - "transactions"
+  
+  order_system:
+    type: "postgresql"
+    host: "${ORDER_DB_HOST}"
+    port: 5432
+    database: "orders"
+    username: "${ORDER_DB_USER}"
+    password: "${ORDER_DB_PASSWORD}"
+    tables:
+      - "orders"
+      - "order_items"
+      - "customers"
+  
+  product_catalog:
+    type: "rest_api"
+    base_url: "${PRODUCT_API_URL}"
+    api_key: "${PRODUCT_API_KEY}"
+    endpoints:
+      products: "/api/v1/products"
+      categories: "/api/v1/categories"
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  handlers:
+    console:
+      enabled: true
+      level: "INFO"
+    
+    file:
+      enabled: true
+      level: "DEBUG"
+      filename: "logs/ecommerce_analytics.log"
+      max_bytes: 10485760  # 10MB
+      backup_count: 5
+    
+    snowflake:
+      enabled: true
+      table: "meta.application_logs"
+
+# Monitoring and Alerts
+monitoring:
+  metrics:
+    - name: "etl_duration_seconds"
+      type: "histogram"
+    - name: "api_request_count"
+      type: "counter"
+    - name: "conversion_rate"
+      type: "gauge"
+    - name: "revenue_total"
+      type: "counter"
+  
+  alerts:
+    - name: "low_conversion_rate"
+      condition: "conversion_rate < 0.02"
+      severity: "warning"
+      notification: ["email", "slack"]
+    
+    - name: "high_cart_abandonment"
+      condition: "cart_abandonment_rate > 0.75"
+      severity: "warning"
+      notification: ["email"]
+    
+    - name: "etl_failure"
+      condition: "etl_status == 'failed'"
+      severity: "critical"
+      notification: ["email", "slack", "pagerduty"]
+    
+    - name: "revenue_drop"
+      condition: "daily_revenue < avg_revenue * 0.5"
+      severity: "high"
+      notification: ["email", "slack"]
+
+# Data Quality Rules
+data_quality:
+  rules:
+    - table: "fact.orders"
+      checks:
+        - type: "not_null"
+          columns: ["order_id", "customer_key", "order_date"]
+        - type: "positive"
+          columns: ["order_total"]
+        - type: "valid_status"
+          column: "order_status"
+          valid_values: ["completed", "pending", "cancelled", "refunded"]
+    
+    - table: "fact.web_events"
+      checks:
+        - type: "not_null"
+          columns: ["event_id", "session_id", "customer_key"]
+        - type: "timestamp_range"
+          column: "event_timestamp"
+          min_date: "2020-01-01"
+          max_date: "2030-12-31"
+    
+    - table: "dim.customer"
+      checks:
+        - type: "unique"
+          columns: ["customer_id"]
+        - type: "email_format"
+          column: "email"
+        - type: "scd_integrity"
+          columns: ["effective_date", "expiry_date", "is_current"]
+
+# Performance Tuning
+performance:
+  query_timeout_seconds: 300
+  max_concurrent_queries: 10
+  result_cache_enabled: true
+  result_cache_ttl_seconds: 3600
+  
+  clustering:
+    enabled: true
+    tables:
+      - table: "fact.orders"
+        keys: ["order_date", "customer_key"]
+      - table: "fact.web_events"
+        keys: ["event_timestamp", "customer_key"]
+  
+  materialized_views:
+    - name: "daily_revenue"
+      refresh_schedule: "0 1 * * *"
+    - name: "customer_ltv"
+      refresh_schedule: "0 2 * * *"
+
+# Security Configuration
+security:
+  encryption:
+    at_rest: true
+    in_transit: true
+  
+  data_masking:
+    enabled: true
+    columns:
+      - "dim.customer.email"
+      - "dim.customer.phone"
+  
+  row_level_security:
+    enabled: false
+  
+  audit_logging:
+    enabled: true
+    log_all_queries: false
+    log_data_access: true
+    retention_days: 365
+
+# dbt Configuration
+dbt:
+  profiles_dir: "~/.dbt"
+  project_dir: "dbt"
+  target: "prod"
+  
+  models:
+    materialized: "table"
+    tags: ["analytics"]
+  
+  tests:
+    enabled: true
+    severity: "warn"
+  
+  docs:
+    generate: true
+    serve_port: 8080
